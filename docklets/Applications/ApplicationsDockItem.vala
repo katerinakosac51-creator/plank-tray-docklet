@@ -18,20 +18,39 @@
 using Plank;
 
 namespace Docky {
+  private class AppEntry {
+    public string name;
+    public string name_lower;
+    public string icon;
+    public string desktop_path;
+
+    public AppEntry (string name, string icon, string desktop_path) {
+      this.name = name;
+      this.name_lower = name.down ();
+      this.icon = icon;
+      this.desktop_path = desktop_path;
+    }
+  }
+
   public class ApplicationsDockItem : DockletItem {
     private uint update_timer_id = 0;
     private GMenu.Tree menu_tree;
-    private Gtk.Menu? menu_widget = null;
-    private Gee.ArrayList<Gtk.MenuItem>? menu_items = null;
+    private Gtk.Window? popup_window = null;
     private bool apps_loaded = false;
     private bool load_in_progress = false;
     private bool reload_requested = false;
     private Gtk.IconTheme icon_theme = Gtk.IconTheme.get_default();
 
+    // Search state
+    private Gee.ArrayList<AppEntry> all_apps;
+    private Gtk.Entry? search_entry = null;
+    private Gtk.Box? search_results_box = null;
+    private Gtk.ScrolledWindow? search_scroll = null;
+    private bool popup_visible = false;
+
     private const string APPLICATIONS_MENU = "applications.menu";
     private const string CINNAMON_APPLICATIONS_MENU = "cinnamon-applications.menu";
     private const string MATE_APPLICATIONS_MENU = "mate-applications.menu";
-    private const string NO_APPS_MESSAGE = _("No applications available");
 
     private ApplicationsPreferences prefs {
       get { return (ApplicationsPreferences) Prefs; }
@@ -44,6 +63,7 @@ namespace Docky {
 
     construct
     {
+      all_apps = new Gee.ArrayList<AppEntry> ();
       update_icon();
 
       ((ApplicationsPreferences) Prefs).notify["CustomIcon"].connect(() => {
@@ -90,28 +110,24 @@ namespace Docky {
         menu_tree = null;
       }
 
-      if (menu_widget != null) {
-        menu_widget.show.disconnect(on_menu_show);
-        menu_widget.hide.disconnect(on_menu_hide);
-        menu_widget = null;
+      if (popup_window != null) {
+        popup_window.destroy ();
+        popup_window = null;
       }
 
       icon_theme.changed.disconnect(on_apps_menu_changed);
     }
 
     private void on_apps_menu_changed() {
-      // Debounce rapid changes (e.g., during package installation)
       schedule_menu_update();
     }
 
     private void schedule_menu_update() {
-      // Cancel any pending update
       if (update_timer_id > 0) {
         Source.remove(update_timer_id);
         update_timer_id = 0;
       }
 
-      // Schedule update with debounce to coalesce rapid changes
       update_timer_id = Timeout.add(2000, () => {
         update_timer_id = 0;
         do_menu_update.begin();
@@ -120,9 +136,7 @@ namespace Docky {
     }
 
     private async void do_menu_update() {
-      // Prevent concurrent load_sync calls on the same GMenu.Tree
       if (load_in_progress) {
-        // Mark that we need to reload when current load finishes
         reload_requested = true;
         return;
       }
@@ -135,7 +149,6 @@ namespace Docky {
       reload_requested = false;
 
       try {
-        // Load menu in background thread to avoid blocking UI
         yield Worker.get_default().add_task_with_result<void*>(() => {
           try {
             menu_tree.load_sync();
@@ -153,39 +166,13 @@ namespace Docky {
 
       load_in_progress = false;
 
-      // Build menu after successful load
       if (apps_loaded) {
-        build_applications_menu();
+        collect_all_apps ();
       }
 
-      // If another update was requested while we were loading, do it now
       if (reload_requested) {
         reload_requested = false;
         schedule_menu_update();
-      }
-    }
-
-    private void on_menu_show() {
-      DockController? controller = get_dock();
-      if (controller == null) {
-        return;
-      }
-
-      controller.window.update_hovered(0, 0);
-      controller.renderer.animated_draw();
-    }
-
-    private void on_menu_hide() {
-      DockController? controller = get_dock();
-      if (controller == null) {
-        return;
-      }
-
-      controller.renderer.animated_draw();
-
-      controller.hide_manager.update_hovered();
-      if (!controller.hide_manager.Hovered) {
-        controller.window.update_hovered(0, 0);
       }
     }
 
@@ -197,98 +184,271 @@ namespace Docky {
     protected override AnimationType on_clicked(PopupButton button,
                                                 Gdk.ModifierType mod, uint32 event_time) {
       if ((button & PopupButton.LEFT) != 0) {
-        show_applications_menu();
+        toggle_popup ();
         return AnimationType.NONE;
       }
 
       return AnimationType.NONE;
     }
 
-    private void build_applications_menu() {
-      DockController? controller = get_dock();
-      if (controller == null) {
-        return;
-      }
+    private void collect_all_apps () {
+      all_apps.clear ();
+      if (menu_tree == null) return;
+      var root = menu_tree.get_root_directory ();
+      if (root != null) collect_apps_recursive (root);
+    }
 
-      menu_items = get_applications_menu_items();
-
-      if (menu_items == null || menu_items.size == 0) {
-        return;
-      }
-
-      if (menu_widget == null) {
-        menu_widget = new Gtk.Menu();
-        menu_widget.reserve_toggle_size = false;
-
-        menu_widget.show.connect(on_menu_show);
-        menu_widget.hide.connect(on_menu_hide);
-        menu_widget.attach_to_widget(controller.window, null);
-      } else {
-        foreach (var w in menu_widget.get_children()) {
-          menu_widget.remove(w);
+    private void collect_apps_recursive (GMenu.TreeDirectory dir) {
+      var iter = dir.iter ();
+      GMenu.TreeItemType type;
+      while ((type = iter.next ()) != GMenu.TreeItemType.INVALID) {
+        if (type == GMenu.TreeItemType.DIRECTORY) {
+          var subdir = iter.get_directory ();
+          if (subdir != null) collect_apps_recursive (subdir);
+        } else if (type == GMenu.TreeItemType.ENTRY) {
+          var entry = iter.get_entry ();
+          if (entry == null) continue;
+          var info = entry.get_app_info ();
+          if (info == null) continue;
+          var path = entry.get_desktop_file_path ();
+          if (path == null) continue;
+          var icon = DrawingService.get_icon_from_gicon (info.get_icon ()) ?? "";
+          var name = info.get_display_name () ?? _("Unknown");
+          all_apps.add (new AppEntry (name, icon, path));
         }
-      }
-
-      foreach (var item in menu_items) {
-        item.show();
-        menu_widget.append(item);
       }
     }
 
-    private void show_applications_menu() {
+    private void on_search_changed () {
+      if (search_entry == null || search_results_box == null)
+        return;
+
+      var query = search_entry.text.down ().strip ();
+
+      // Remove old search results
+      foreach (var child in search_results_box.get_children ())
+        search_results_box.remove (child);
+
+      // Show matching apps (all when query is empty)
+      int count = 0;
+      foreach (var app in all_apps) {
+        if (count >= 50) break;
+        if (query == "" || app.name_lower.contains (query)) {
+          var item = create_search_result_item (app);
+          search_results_box.pack_start (item, false, false, 0);
+          count++;
+        }
+      }
+
+      if (count == 0) {
+        var label = new Gtk.Label (_("No results"));
+        label.sensitive = false;
+        label.margin = 6;
+        label.show ();
+        search_results_box.pack_start (label, false, false, 0);
+      }
+
+      search_results_box.show_all ();
+    }
+
+    private void on_search_activate () {
+      if (search_results_box == null) return;
+      var children = search_results_box.get_children ();
+      if (children.length () > 0) {
+        var first = children.first ().data as Gtk.Button;
+        if (first != null)
+          first.clicked ();
+      }
+    }
+
+    private Gtk.Button create_search_result_item (AppEntry app) {
+      int width, height;
+      Gtk.icon_size_lookup (Gtk.IconSize.MENU, out width, out height);
+
+      var btn = new Gtk.Button ();
+      btn.relief = Gtk.ReliefStyle.NONE;
+      var box = new Gtk.Box (Gtk.Orientation.HORIZONTAL, 6);
+
+      var pixbuf = DrawingService.load_icon (app.icon, width, height);
+      Gtk.Image image;
+      if (pixbuf != null)
+        image = new Gtk.Image.from_pixbuf (pixbuf);
+      else
+        image = new Gtk.Image.from_icon_name ("application-x-executable", Gtk.IconSize.MENU);
+
+      var label = new Gtk.Label (app.name);
+      label.halign = Gtk.Align.START;
+      label.ellipsize = Pango.EllipsizeMode.END;
+
+      box.pack_start (image, false, false, 0);
+      box.pack_start (label, true, true, 0);
+      btn.add (box);
+
+      var path = app.desktop_path;
+      btn.clicked.connect (() => {
+        System.get_default ().launch (File.new_for_path (path));
+        hide_popup ();
+      });
+
+      btn.show_all ();
+      return btn;
+    }
+
+    private void ensure_popup () {
+      if (popup_window != null) return;
+
+      popup_window = new Gtk.Window (Gtk.WindowType.TOPLEVEL);
+      popup_window.type_hint = Gdk.WindowTypeHint.POPUP_MENU;
+      popup_window.decorated = false;
+      popup_window.resizable = false;
+      popup_window.skip_taskbar_hint = true;
+      popup_window.skip_pager_hint = true;
+      popup_window.set_keep_above (true);
+
+      // Rounded corners via CSS
+      var css_provider = new Gtk.CssProvider ();
+      try {
+        css_provider.load_from_data ("window { border-radius: 12px; }");
+      } catch (Error e) {
+        warning ("Failed to load CSS: %s", e.message);
+      }
+      popup_window.get_style_context ().add_provider (css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+      popup_window.app_paintable = true;
+      popup_window.set_visual (popup_window.get_screen ().get_rgba_visual ());
+
+      var vbox = new Gtk.Box (Gtk.Orientation.VERTICAL, 4);
+      vbox.margin = 6;
+
+      // Search entry
+      search_entry = new Gtk.Entry ();
+      search_entry.placeholder_text = _("Search applications...");
+      search_entry.secondary_icon_name = "edit-find-symbolic";
+      search_entry.changed.connect (on_search_changed);
+      search_entry.activate.connect (on_search_activate);
+      vbox.pack_start (search_entry, false, false, 0);
+
+      // Results
+      search_results_box = new Gtk.Box (Gtk.Orientation.VERTICAL, 0);
+      search_scroll = new Gtk.ScrolledWindow (null, null);
+      search_scroll.set_policy (Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC);
+      search_scroll.set_size_request (280, 400);
+      search_scroll.add (search_results_box);
+      vbox.pack_start (search_scroll, true, true, 0);
+
+      popup_window.add (vbox);
+
+      // Escape to close
+      popup_window.key_press_event.connect ((event) => {
+        if (event.keyval == Gdk.Key.Escape) {
+          hide_popup ();
+          return true;
+        }
+        return false;
+      });
+
+      // Close on focus loss
+      popup_window.focus_out_event.connect (() => {
+        // Delay slightly to allow clicks on the dock icon to toggle
+        Timeout.add (150, () => {
+          if (popup_window != null && !popup_window.has_toplevel_focus) {
+            hide_popup ();
+          }
+          return false;
+        });
+        return false;
+      });
+    }
+
+    private void toggle_popup () {
+      if (popup_visible) {
+        hide_popup ();
+      } else {
+        show_popup ();
+      }
+    }
+
+    private void show_popup () {
+      if (!apps_loaded || all_apps.size == 0) return;
+
       DockController? controller = get_dock();
-      if (controller == null) {
-        return;
-      }
+      if (controller == null) return;
 
-      if (menu_widget == null || menu_items == null || menu_items.size == 0) {
-        return;
-      }
+      ensure_popup ();
 
-      Gtk.Requisition requisition;
-      menu_widget.get_preferred_size(null, out requisition);
+      // Clear and populate
+      search_entry.text = "";
+      on_search_changed ();
+
+      // Show to get requisition
+      popup_window.show_all ();
+
+      Gtk.Requisition req;
+      popup_window.get_preferred_size (null, out req);
+
+      // Get dock window position and icon center
+      int win_x, win_y;
+      controller.window.get_position (out win_x, out win_y);
+
+      var icon_rect = controller.position_manager.get_hover_region_for_element (this);
+      int icon_center_x = win_x + icon_rect.x + icon_rect.width / 2;
+      int icon_center_y = win_y + icon_rect.y + icon_rect.height / 2;
 
       int x, y;
-      controller.position_manager.get_menu_position(this, requisition, out x, out y);
-
-      Gdk.Gravity gravity;
-      Gdk.Gravity flipped_gravity;
 
       switch (controller.position_manager.Position) {
-      case Gtk.PositionType.BOTTOM :
-        gravity = Gdk.Gravity.NORTH;
-        flipped_gravity = Gdk.Gravity.SOUTH;
+      case Gtk.PositionType.BOTTOM:
+        x = icon_center_x;
+        y = win_y + icon_rect.y - req.height;
         break;
-      case Gtk.PositionType.TOP :
-        gravity = Gdk.Gravity.SOUTH;
-        flipped_gravity = Gdk.Gravity.NORTH;
+      case Gtk.PositionType.TOP:
+        x = icon_center_x;
+        y = win_y + icon_rect.y + icon_rect.height;
         break;
-      case Gtk.PositionType.LEFT :
-        gravity = Gdk.Gravity.EAST;
-        flipped_gravity = Gdk.Gravity.WEST;
+      case Gtk.PositionType.LEFT:
+        x = win_x + icon_rect.x + icon_rect.width;
+        y = icon_center_y - req.height / 2;
         break;
-      case Gtk.PositionType.RIGHT :
-        gravity = Gdk.Gravity.WEST;
-        flipped_gravity = Gdk.Gravity.EAST;
+      case Gtk.PositionType.RIGHT:
+        x = win_x - req.width;
+        y = icon_center_y - req.height / 2;
         break;
       default:
-        gravity = Gdk.Gravity.NORTH;
-        flipped_gravity = Gdk.Gravity.SOUTH;
+        x = icon_center_x;
+        y = win_y - req.height;
         break;
       }
 
-      menu_widget.popup_at_rect(
-                             controller.window.get_screen().get_root_window(),
-                             Gdk.Rectangle() {
-        x = x,
-        y = y,
-        width = 1,
-        height = 1,
-      },
-                             gravity,
-                             flipped_gravity,
-                             null
-      );
+      popup_window.move (x, y);
+      popup_window.present ();
+      popup_visible = true;
+
+      // Ensure focus even when activated via global keybinding
+      popup_window.present_with_time (Gdk.CURRENT_TIME);
+      Idle.add (() => {
+        if (search_entry != null) {
+          search_entry.grab_focus ();
+        }
+        return false;
+      });
+
+      controller.window.update_hovered(0, 0);
+      controller.renderer.animated_draw();
+    }
+
+    private void hide_popup () {
+      if (popup_window != null) {
+        popup_window.hide ();
+      }
+      popup_visible = false;
+
+      DockController? controller = get_dock();
+      if (controller == null) return;
+
+      controller.renderer.animated_draw();
+      controller.hide_manager.update_hovered();
+      if (!controller.hide_manager.Hovered) {
+        controller.window.update_hovered(0, 0);
+      }
     }
 
     public override Gee.ArrayList<Gtk.MenuItem> get_menu_items() {
@@ -355,7 +515,6 @@ namespace Docky {
       });
       items.add(custom_icon_item);
 
-      // If custom icon is set, add option to reset to default
       if (prefs.CustomIcon != "") {
         var reset_icon_item = create_menu_item(_("Reset to Default Icon"), "edit-clear", false);
         reset_icon_item.activate.connect(() => {
@@ -371,7 +530,6 @@ namespace Docky {
       large_icons_item.active = prefs.LargeIcons;
       large_icons_item.activate.connect(() => {
         prefs.LargeIcons = !prefs.LargeIcons;
-        build_applications_menu();
       });
       items.add(large_icons_item);
 
@@ -442,146 +600,6 @@ namespace Docky {
       }
 
       file_chooser.destroy();
-    }
-
-    private Gtk.MenuItem create_applications_menu_item(string title, string? icon, bool force_show_icon) {
-      if (icon == null || icon == "") {
-        icon = "application-x-executable";
-      }
-
-      int width, height;
-      if (prefs.LargeIcons) {
-        Gtk.icon_size_lookup(Gtk.IconSize.LARGE_TOOLBAR, out width, out height);
-      } else {
-        Gtk.icon_size_lookup(Gtk.IconSize.MENU, out width, out height);
-      }
-
-      var item = new Gtk.MenuItem();
-      var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
-
-      var image = new Gtk.Image.from_pixbuf(DrawingService.load_icon(icon, width, height));
-      var label = new Gtk.Label.with_mnemonic(title);
-
-      label.halign = Gtk.Align.START;
-      label.valign = Gtk.Align.CENTER;
-
-      if (force_show_icon) {
-        box.pack_start(image, false, false, 0);
-      }
-      box.pack_start(label, true, true, 0);
-
-      item.add(box);
-      item.show_all();
-
-      return item;
-    }
-
-    private Gee.ArrayList<Gtk.MenuItem> get_applications_menu_items() {
-      var items = new Gee.ArrayList<Gtk.MenuItem> ();
-
-      // Don't try to read menu while a load is in progress
-      if (load_in_progress || !apps_loaded || menu_tree == null) {
-        items.add(create_applications_menu_item(NO_APPS_MESSAGE, null, false));
-        return items;
-      }
-
-      GMenu.TreeDirectory? root_dir = menu_tree.get_root_directory();
-
-      if (root_dir == null) {
-        items.add(create_applications_menu_item(NO_APPS_MESSAGE, null, false));
-        return items;
-      }
-
-      var iter = root_dir.iter();
-      GMenu.TreeItemType type;
-      while ((type = iter.next()) != GMenu.TreeItemType.INVALID) {
-        if (type == GMenu.TreeItemType.DIRECTORY) {
-          var dir = iter.get_directory();
-          if (dir != null) {
-            var submenu_item = get_submenu_item(dir);
-            if (submenu_item != null) {
-              items.add(submenu_item);
-            }
-          }
-        }
-      }
-
-      return items;
-    }
-
-    private Gtk.MenuItem? get_submenu_item(GMenu.TreeDirectory? category) {
-      if (category == null) {
-        return null;
-      }
-
-      var icon = DrawingService.get_icon_from_gicon(category.get_icon()) ?? "";
-      var name = category.get_name() ?? _("Unknown");
-
-      var submenu = new Gtk.Menu();
-      submenu.reserve_toggle_size = false;
-
-      add_menu_items(submenu, category);
-
-      // Skip empty categories
-      if (submenu.get_children().length() == 0) {
-        submenu.destroy();
-        return null;
-      }
-
-      var item = create_applications_menu_item(name, icon, true);
-      item.submenu = submenu;
-      submenu.show();
-      item.show();
-
-      return item;
-    }
-
-    private void add_menu_items(Gtk.Menu menu, GMenu.TreeDirectory? category) {
-      if (category == null) {
-        return;
-      }
-
-      var iter = category.iter();
-      GMenu.TreeItemType type;
-      while ((type = iter.next()) != GMenu.TreeItemType.INVALID) {
-        if (type == GMenu.TreeItemType.DIRECTORY) {
-          var dir = iter.get_directory();
-          if (dir != null) {
-            var submenu_item = get_submenu_item(dir);
-            if (submenu_item != null) {
-              menu.add(submenu_item);
-            }
-          }
-        } else if (type == GMenu.TreeItemType.ENTRY) {
-          var entry = iter.get_entry();
-          if (entry == null) {
-            continue;
-          }
-
-          var info = entry.get_app_info();
-          if (info == null) {
-            continue;
-          }
-
-          var desktop_path = entry.get_desktop_file_path();
-          if (desktop_path == null) {
-            continue;
-          }
-
-          var icon = DrawingService.get_icon_from_gicon(info.get_icon()) ?? "";
-          var display_name = info.get_display_name() ?? _("Unknown");
-          var item = create_applications_menu_item(display_name, icon, true);
-
-          // Capture desktop_path by value for the closure
-          var path_copy = desktop_path;
-          item.activate.connect(() => {
-            System.get_default().launch(File.new_for_path(path_copy));
-          });
-
-          item.show();
-          menu.add(item);
-        }
-      }
     }
   }
 }

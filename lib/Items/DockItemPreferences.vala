@@ -42,6 +42,9 @@ namespace Plank {
     [Description (nick = "large-icons", blurb = "Use large icons.")]
     public bool LargeIcons { get; set; default = false; }
 
+    [Description (nick = "keybinding", blurb = "Global keybinding to activate this item (GTK accelerator format, e.g. <Super> or <Control><Alt>a).")]
+    public string Keybinding { get; set; default = ""; }
+
     /**
      * {@inheritDoc}
      */
@@ -76,6 +79,7 @@ namespace Plank {
       DirectoryStyle = DirStyle.SIMPLE;
       ShowHiddenFiles = false;
       LargeIcons = false;
+      Keybinding = "";
     }
 
     /**

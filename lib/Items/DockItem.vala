@@ -166,6 +166,9 @@ namespace Plank {
       notify["Progress"].connect (reset_foreground_buffer);
       notify["ProgressVisible"].connect (reset_foreground_buffer);
 
+      Prefs.notify["Keybinding"].connect (handle_keybinding_changed);
+      handle_keybinding_changed ();
+
       launcher_file_monitor_start ();
       if (ForcePixbuf == null)
         icon_file_monitor_start ();
@@ -177,6 +180,8 @@ namespace Plank {
 
       Prefs.deleted.disconnect (handle_deleted);
       Prefs.notify["Launcher"].disconnect (handle_launcher_changed);
+      Prefs.notify["Keybinding"].disconnect (handle_keybinding_changed);
+      KeybindingManager.get_default ().unbind (this);
 
       DrawingService.get_icon_theme ().changed.disconnect (icon_theme_changed);
       notify["Icon"].disconnect (icon_changed);
@@ -206,6 +211,15 @@ namespace Plank {
      */
     protected virtual void load_from_launcher () {
       // No default implementation needed
+    }
+
+    void handle_keybinding_changed () {
+      var kb = Prefs.Keybinding;
+      if (kb != null && kb != "") {
+        KeybindingManager.get_default ().bind (kb, this);
+      } else {
+        KeybindingManager.get_default ().unbind (this);
+      }
     }
 
     void handle_launcher_changed () {

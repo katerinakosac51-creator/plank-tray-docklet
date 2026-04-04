@@ -790,6 +790,30 @@ along with plank.  If not, see <http://www.gnu.org/licenses/>.
             <property name="position">2</property>
           </packing>
         </child>
+        <child>
+          <object class="GtkScrolledWindow" id="sw_keybindings">
+            <property name="visible">True</property>
+            <property name="can_focus">True</property>
+            <property name="hscrollbar_policy">never</property>
+            <child>
+              <object class="GtkBox" id="box_keybindings">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="orientation">vertical</property>
+                <property name="spacing">0</property>
+                <property name="margin_left">16</property>
+                <property name="margin_right">16</property>
+                <property name="margin_top">16</property>
+                <property name="margin_bottom">16</property>
+              </object>
+            </child>
+          </object>
+          <packing>
+            <property name="name">view_keybindings</property>
+            <property name="title" translatable="yes">Keybindings</property>
+            <property name="position">3</property>
+          </packing>
+        </child>
       </object>
     </child>
     <child type="titlebar">

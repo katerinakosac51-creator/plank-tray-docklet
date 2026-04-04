@@ -20,8 +20,9 @@ Like its predecessor, Plank Reloaded aims to be the simplest dock on the planet,
 - Max zoom increased to 400%
 - Floating dock support with configurable gap from the screen edge
 - Multi-monitor support with active display tracking
+- Global keybindings for dock items (configurable per-item via Preferences → Keybindings)
 - Comprehensive docklet improvements:
-  - Applications: Better reliability and fixed duplicate items issue
+  - Applications: Popup window with search, rounded corners, keyboard-driven (Super key support)
   - Battery: Modern UPower integration
   - Clock: Enhanced digital display with new pop-up calendar
   - Clippy: Image support, improved text handling and menu organization
