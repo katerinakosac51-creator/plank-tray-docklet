@@ -16,7 +16,6 @@ Plank Tray Docklet is a customized fork of Plank Reloaded that adds a **System T
 - **NowPlaying Docklet** — Displays media playback information and controls, auto-switches to the active MPRIS source, and prefers dedicated music apps (like Spotify) over browser sessions when both are playing
 - **Recent Files Docklet** — Quick access to recently opened files
 - **Stacks Docklet** — Stack-based file/folder shortcuts on the dock
-- **Global Keybindings** — Configurable per-item keybindings via Preferences → Keybindings
 - **Applications Docklet Modernized** — Popup window with search, rounded corners, keyboard-driven (Super key support)
 - **Clippy Docklet Enhanced** — Image support, improved text handling and menu organization
 
