@@ -112,6 +112,321 @@ namespace Plank {
       return null;
     }
 
+    bool is_groupable_item (DockItem item) {
+      if (item is FolderDockItem)
+        return true;
+      if (item is FileDockItem)
+        return true;
+      if (item is DockletItem)
+        return normalized_item_launcher (item) != "";
+
+      unowned ApplicationDockItem? app_item = (item as ApplicationDockItem);
+      if (app_item == null)
+        return false;
+
+      return normalized_item_launcher (item) != "";
+    }
+
+    string normalize_launcher_uri (string uri) {
+      if (uri == null || uri == "")
+        return "";
+      if (uri.has_prefix ("file://") || uri.has_prefix ("application://")
+          || uri.has_prefix (DOCKLET_URI_PREFIX)
+          || uri.has_prefix (FolderDockItem.URI_PREFIX)
+          || uri.contains ("://"))
+        return uri;
+      if (uri.has_prefix ("/")) {
+        try {
+          return Filename.to_uri (uri);
+        } catch (ConvertError e) {
+          warning (e.message);
+        }
+      }
+      return uri;
+    }
+
+    string normalized_item_launcher (DockItem item) {
+      if (item is FolderDockItem)
+        return item.Launcher;
+      return normalize_launcher_uri (item.Launcher);
+    }
+
+    void remove_grouped_source_item (DockItem item) {
+      remove (item);
+      // Keep folder .dockitem files when nested so their metadata survives.
+      if (item.DockItemFilename != "" && !(item is FolderDockItem))
+        item.delete ();
+    }
+
+    File? find_existing_dockitem_file_for_launcher (string launcher_uri) {
+      try {
+        var enumerator = LaunchersDir.enumerate_children (FileAttribute.STANDARD_NAME, FileQueryInfoFlags.NONE);
+        FileInfo? info;
+        while ((info = enumerator.next_file ()) != null) {
+          var name = info.get_name ();
+          if (name == null || !name.has_suffix (".dockitem"))
+            continue;
+
+          var file = LaunchersDir.get_child (name);
+          try {
+            var key = new KeyFile ();
+            key.load_from_file (file.get_path (), 0);
+            if (!key.has_key (typeof (DockItemPreferences).name (), "Launcher"))
+              continue;
+
+            var existing = key.get_string (typeof (DockItemPreferences).name (), "Launcher");
+            if (existing == launcher_uri)
+              return file;
+          } catch {}
+        }
+      } catch {}
+
+      return null;
+    }
+
+    bool get_folder_members_for_uri (string folder_uri, out Gee.ArrayList<string> members) {
+      members = new Gee.ArrayList<string> ();
+
+      unowned FolderDockItem? live_folder = folder_for_uri (folder_uri);
+      if (live_folder != null) {
+        members = live_folder.get_members ();
+        return true;
+      }
+
+      var file = find_existing_dockitem_file_for_launcher (folder_uri);
+      if (file == null)
+        return false;
+
+      try {
+        var key = new KeyFile ();
+        key.load_from_file (file.get_path (), 0);
+        if (!key.has_key (typeof (DockItemPreferences).name (), "FolderMembers"))
+          return true;
+
+        var serialized = key.get_string (typeof (DockItemPreferences).name (), "FolderMembers");
+        members = FolderDockItem.parse_members (serialized);
+        return true;
+      } catch {}
+
+      return false;
+    }
+
+    bool folder_contains_member_recursive (string folder_uri, string member_uri, Gee.HashSet<string>? visited = null) {
+      Gee.HashSet<string> seen = (visited != null) ? visited : new Gee.HashSet<string> ();
+
+      if (seen.contains (folder_uri))
+        return false;
+      seen.add (folder_uri);
+
+      Gee.ArrayList<string> members;
+      if (!get_folder_members_for_uri (folder_uri, out members))
+        return false;
+
+      foreach (var member in members) {
+        if (member == member_uri)
+          return true;
+
+        if (FolderDockItem.is_folder_uri (member)
+            && folder_contains_member_recursive (member, member_uri, seen))
+          return true;
+      }
+
+      return false;
+    }
+
+    unowned FolderDockItem? folder_for_uri (string folder_uri) {
+      foreach (var element in internal_elements) {
+        unowned FolderDockItem? folder = (element as FolderDockItem);
+        if (folder != null && folder.Launcher == folder_uri)
+          return folder;
+      }
+      return null;
+    }
+
+    bool resolve_drop_uri (string uri, out string resolved_uri, out string? source_folder_uri) {
+      resolved_uri = uri;
+      source_folder_uri = null;
+
+      string folder_uri;
+      string member_uri;
+      if (FolderDockItem.decode_member_drag_uri (uri, out folder_uri, out member_uri)) {
+        resolved_uri = member_uri;
+        source_folder_uri = folder_uri;
+      }
+
+      return true;
+    }
+
+    bool contains_internal_uri (string uri) {
+      foreach (var element in internal_elements) {
+        unowned DockItem? item = (element as DockItem);
+        if (item != null && item.Launcher == uri)
+          return true;
+      }
+      return false;
+    }
+
+    void cleanup_folder_after_change (FolderDockItem folder) {
+      int count = folder.get_member_count ();
+      if (count > 1)
+        return;
+
+      delay_items_monitor ();
+
+      if (count <= 0) {
+        remove (folder);
+        folder.delete ();
+        resume_items_monitor ();
+        return;
+      }
+
+      var remaining = folder.get_single_remaining_member ();
+      if (remaining == null || remaining == "") {
+        remove (folder);
+        folder.delete ();
+        resume_items_monitor ();
+        return;
+      }
+
+      File? replacement_file = find_existing_dockitem_file_for_launcher (remaining);
+      if (replacement_file == null)
+        replacement_file = Factory.item_factory.make_dock_item (remaining, LaunchersDir);
+      if (replacement_file == null) {
+        resume_items_monitor ();
+        return;
+      }
+
+      var replacement_element = Factory.item_factory.make_element (replacement_file);
+      unowned DockItem? replacement = (replacement_element as DockItem);
+      if (replacement == null) {
+        resume_items_monitor ();
+        return;
+      }
+
+      replace (replacement, folder);
+      folder.delete ();
+      resume_items_monitor ();
+    }
+
+    public bool remove_member_from_folder (string folder_uri, string member_uri) {
+      unowned FolderDockItem? folder = folder_for_uri (folder_uri);
+      if (folder == null)
+        return false;
+
+      var members = folder.get_members ();
+      int index_to_remove = -1;
+      var normalized_member = normalize_launcher_uri (member_uri);
+
+      for (int i = 0; i < members.size; i++) {
+        var candidate = members[i];
+        if (candidate == member_uri) {
+          index_to_remove = i;
+          break;
+        }
+
+        var normalized_candidate = normalize_launcher_uri (candidate);
+        if (normalized_candidate != "" && normalized_candidate == normalized_member) {
+          index_to_remove = i;
+          break;
+        }
+      }
+
+      if (index_to_remove < 0)
+        return false;
+
+      members.remove_at (index_to_remove);
+      folder.set_members (members);
+      cleanup_folder_after_change (folder);
+      return true;
+    }
+
+    public bool try_group_items (DockItem source, DockItem target) {
+      if (!internal_elements.contains (source) || !internal_elements.contains (target))
+        return false;
+      if (source == target)
+        return false;
+
+      if (!is_groupable_item (source) || !is_groupable_item (target))
+        return false;
+
+      unowned FolderDockItem? source_folder = (source as FolderDockItem);
+      unowned FolderDockItem? target_folder = (target as FolderDockItem);
+
+      if (target_folder != null) {
+        var source_uri = normalized_item_launcher (source);
+        if (source_uri == "")
+          return false;
+
+        if (source_folder != null) {
+          if (source_folder.Launcher == target_folder.Launcher)
+            return false;
+
+          // Prevent recursive cycles like A -> ... -> B and then B contains A.
+          if (folder_contains_member_recursive (source_folder.Launcher, target_folder.Launcher))
+            return false;
+        }
+
+        if (target_folder.add_member (source_uri)) {
+          delay_items_monitor ();
+          remove_grouped_source_item (source);
+          cleanup_folder_after_change (target_folder);
+          resume_items_monitor ();
+          return true;
+        }
+        return false;
+      }
+
+      if (source_folder != null) {
+        var target_uri = normalized_item_launcher (target);
+        if (target_uri == "")
+          return false;
+
+        if (source_folder.add_member (target_uri)) {
+          delay_items_monitor ();
+          remove_grouped_source_item (target);
+          cleanup_folder_after_change (source_folder);
+          resume_items_monitor ();
+          return true;
+        }
+        return false;
+      }
+
+      delay_items_monitor ();
+
+      var folder_uri = FolderDockItem.make_folder_uri ();
+      var folder_file = Factory.item_factory.make_dock_item (folder_uri, LaunchersDir);
+      if (folder_file == null) {
+        resume_items_monitor ();
+        return false;
+      }
+
+      var folder_element = Factory.item_factory.make_element (folder_file);
+      unowned FolderDockItem? folder_item = (folder_element as FolderDockItem);
+      if (folder_item == null) {
+        resume_items_monitor ();
+        return false;
+      }
+
+      var source_uri = normalized_item_launcher (source);
+      var target_uri = normalized_item_launcher (target);
+      if (source_uri == "" || target_uri == "") {
+        resume_items_monitor ();
+        return false;
+      }
+
+      var members = new Gee.ArrayList<string> ();
+      members.add (target_uri);
+      members.add (source_uri);
+      folder_item.set_members (members);
+
+      add (folder_item, target);
+      remove_grouped_source_item (source);
+      remove_grouped_source_item (target);
+
+      resume_items_monitor ();
+      return true;
+    }
+
     /**
      * {@inheritDoc}
      */
@@ -124,15 +439,25 @@ namespace Plank {
         return false;
       }
 
-      if (item_exists_for_uri (uri) && !allow_duplicate_item (uri)) {
-        warning ("Item for '%s' already exists in this DockItemProvider.", uri);
+      string resolved_uri;
+      string? source_folder_uri;
+      resolve_drop_uri (uri, out resolved_uri, out source_folder_uri);
+      var original_member_uri = resolved_uri;
+      resolved_uri = normalize_launcher_uri (resolved_uri);
+
+      if (contains_internal_uri (resolved_uri) && !allow_duplicate_item (resolved_uri)) {
+        warning ("Item for '%s' already exists in this DockItemProvider.", resolved_uri);
         return false;
       }
 
       // delay automatic add of new dockitems while creating this new one
       delay_items_monitor ();
 
-      var dockitem_file = Factory.item_factory.make_dock_item (uri, LaunchersDir);
+      File? dockitem_file = allow_duplicate_item (resolved_uri)
+        ? null
+        : find_existing_dockitem_file_for_launcher (resolved_uri);
+      if (dockitem_file == null)
+        dockitem_file = Factory.item_factory.make_dock_item (resolved_uri, LaunchersDir);
       if (dockitem_file == null) {
         resume_items_monitor ();
         return false;
@@ -147,9 +472,51 @@ namespace Plank {
 
       add (item, target);
 
+      if (source_folder_uri != null) {
+        // Remove using the original member payload form to avoid URI/path
+        // normalization mismatches with older folder entries.
+        if (!remove_member_from_folder (source_folder_uri, original_member_uri))
+          remove_member_from_folder (source_folder_uri, resolved_uri);
+      }
+
       resume_items_monitor ();
 
       return true;
+    }
+
+    public override bool can_accept_drop (Gee.ArrayList<string> uris) {
+      foreach (var raw in uris) {
+        string uri;
+        string? source_folder_uri;
+        resolve_drop_uri (raw, out uri, out source_folder_uri);
+
+        if (!contains_internal_uri (uri) || allow_duplicate_item (uri))
+          return true;
+      }
+      return false;
+    }
+
+    public override bool accept_drop (Gee.ArrayList<string> uris) {
+      bool result = false;
+
+      unowned DockItem? target_item = null;
+      unowned DockController? controller = get_dock ();
+      if (controller != null && controller.window.HoveredItemProvider == this) {
+        target_item = controller.position_manager.get_current_target_item (this);
+      }
+
+      foreach (var raw in uris) {
+        string uri;
+        string? source_folder_uri;
+        resolve_drop_uri (raw, out uri, out source_folder_uri);
+
+        if (!contains_internal_uri (uri) || allow_duplicate_item (uri)) {
+          if (add_item_with_uri (raw, target_item))
+            result = true;
+        }
+      }
+
+      return result;
     }
 
     /**

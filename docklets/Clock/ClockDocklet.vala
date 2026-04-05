@@ -24,7 +24,8 @@ namespace Docky {
 
   public class ClockDocklet : Object, Plank.Docklet {
     private const string ID = "clock";
-    private const string ICON = "gnome-clocks;;clock;;xclock";
+    private const string ICON_RESOURCE = "resource://" + G_RESOURCE_PATH + "/icons/clock.svg";
+    private const string ICON = "gnome-clocks;;clock;;xclock;;" + ICON_RESOURCE;
 
     public unowned string get_id () { return ID; }
 

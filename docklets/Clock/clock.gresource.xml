@@ -20,6 +20,10 @@
 		<file
       compressed="true"
       preprocess="xml-stripblanks"
+    >icons/clock.svg</file>
+		<file
+      compressed="true"
+      preprocess="xml-stripblanks"
     >themes/Default/clock-drop-shadow.svg</file>
 		<file
       compressed="true"

@@ -152,6 +152,8 @@ namespace Plank {
      * @return the new {@link DockElement} created
      */
     protected DockElement default_make_element (GLib.File file, string launcher) {
+      if (FolderDockItem.is_folder_uri (launcher))
+        return new FolderDockItem.with_dockitem_file (file);
       if (launcher.has_suffix (".desktop"))
         return new ApplicationDockItem.with_dockitem_file (file);
       return new FileDockItem.with_dockitem_file (file);
@@ -228,8 +230,9 @@ namespace Plank {
           if (item == null)
             continue;
 
-          unowned DockItem? dupe;
-          if ((dupe = find_item_for_uri (result, item.Launcher)) != null) {
+          unowned DockItem? dupe = null;
+          if (!item.Launcher.has_prefix (DOCKLET_URI_PREFIX)
+              && (dupe = find_item_for_uri (result, item.Launcher)) != null) {
             warning ("The launcher '%s' in dock item '%s' is already managed by dock item '%s'. Removing '%s'.",
                      item.Launcher, file.get_path (), dupe.DockItemFilename, item.DockItemFilename);
             item.delete ();
@@ -407,6 +410,9 @@ namespace Plank {
       if (uri.has_prefix (DOCKLET_URI_PREFIX)) {
         is_valid = true;
         basename = uri.substring (10);
+      } else if (FolderDockItem.is_folder_uri (uri)) {
+        is_valid = true;
+        basename = "folder";
       } else {
         var launcher_file = File.new_for_uri (uri);
         is_valid = launcher_file.query_exists ();

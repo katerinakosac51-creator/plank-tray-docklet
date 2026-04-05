@@ -96,11 +96,7 @@ namespace Plank {
     }
 
     protected bool allow_duplicate_item (string uri) {
-      if (uri == "docklet://separator") {
-        return true;
-      }
-
-      return false;
+      return uri.has_prefix (DOCKLET_URI_PREFIX);
     }
 
     protected override void connect_element (DockElement element) {
