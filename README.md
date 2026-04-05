@@ -1,6 +1,28 @@
-# Plank Reloaded
+# Plank Tray Docklet
+
+> **This is a fork of [Plank Reloaded](https://github.com/zquestz/plank-reloaded), which itself is a fork of the original [Plank](https://launchpad.net/plank) project.**
+>
+> This fork adds a **System Tray docklet** and several other enhancements on top of Plank Reloaded.
 
 [![GitHub Release](https://img.shields.io/github/v/release/zquestz/plank-reloaded)](https://github.com/zquestz/plank-reloaded/releases) [![Crowdin](https://badges.crowdin.net/plank-reloaded/localized.svg)](https://crowdin.com/project/plank-reloaded)
+
+## What Is Plank Tray Docklet?
+
+Plank Tray Docklet is a customized fork of Plank Reloaded that adds a **System Tray (StatusNotifierItem) docklet**, allowing background and system tray applications to appear directly on your dock. In addition to the tray functionality, this fork includes several new docklets and improvements.
+
+### Changes in This Fork
+
+- **Tray Docklet** — Shows system tray (StatusNotifierItem) icons on the dock, letting you interact with tray apps directly
+- **NowPlaying Docklet** — Displays media playback information and controls
+- **Recent Files Docklet** — Quick access to recently opened files
+- **Stacks Docklet** — Stack-based file/folder shortcuts on the dock
+- **Global Keybindings** — Configurable per-item keybindings via Preferences → Keybindings
+- **Applications Docklet Modernized** — Popup window with search, rounded corners, keyboard-driven (Super key support)
+- **Clippy Docklet Enhanced** — Image support, improved text handling and menu organization
+
+All features from Plank Reloaded remain intact. See below for the full feature set inherited from the parent project.
+
+---
 
 ## What Is Plank Reloaded?
 
@@ -20,12 +42,9 @@ Like its predecessor, Plank Reloaded aims to be the simplest dock on the planet,
 - Max zoom increased to 400%
 - Floating dock support with configurable gap from the screen edge
 - Multi-monitor support with active display tracking
-- Global keybindings for dock items (configurable per-item via Preferences → Keybindings)
 - Comprehensive docklet improvements:
-  - Applications: Popup window with search, rounded corners, keyboard-driven (Super key support)
   - Battery: Modern UPower integration
   - Clock: Enhanced digital display with new pop-up calendar
-  - Clippy: Image support, improved text handling and menu organization
   - Notifications: Displays system notifications on the dock
   - Separator: A simple separator so you can set up a macOS-like dock experience
   - Workspaces: A graphical workspace switcher
