@@ -34,6 +34,11 @@ interface DBusNameList : Object {
   public abstract string[] list_names () throws Error;
 }
 
+[DBus (name = "org.freedesktop.DBus")]
+interface DBusMonitor : Object {
+  public signal void name_owner_changed (string name, string old_owner, string new_owner);
+}
+
 [DBus (name = "org.freedesktop.DBus.Properties")]
 interface DBusProperties : Object {
   public signal void properties_changed (string iface, HashTable<string, Variant> changed,
@@ -46,7 +51,9 @@ namespace Docky {
     private MprisPlayer? player = null;
     private DBusProperties? props_proxy = null;
     private DBusNameList? dbus_list = null;
+    private DBusMonitor? dbus_monitor = null;
     private ulong props_handler_id = 0;
+    private ulong name_owner_handler_id = 0;
     private uint poll_timer_id = 0;
 
     private string current_title = "";
@@ -69,12 +76,12 @@ namespace Docky {
       Icon = NowPlayingDocklet.ICON;
       Text = _("No media playing");
 
-      find_player.begin ();
+      bind_dbus_monitor.begin ();
+      refresh_player_connection.begin ();
 
       // Poll for new players every 5 seconds
       poll_timer_id = Timeout.add_seconds (5, () => {
-        if (player == null)
-          find_player.begin ();
+        refresh_player_connection.begin ();
         return true;
       });
     }
@@ -86,12 +93,21 @@ namespace Docky {
       }
 
       disconnect_player ();
+      disconnect_monitor ();
 
       if (menu_widget != null) {
         menu_widget.show.disconnect (on_menu_show);
         menu_widget.hide.disconnect (on_menu_hide);
         menu_widget = null;
       }
+    }
+
+    private void disconnect_monitor () {
+      if (dbus_monitor != null && name_owner_handler_id > 0) {
+        dbus_monitor.disconnect (name_owner_handler_id);
+        name_owner_handler_id = 0;
+      }
+      dbus_monitor = null;
     }
 
     private void disconnect_player () {
@@ -104,22 +120,36 @@ namespace Docky {
       current_player_bus = "";
     }
 
-    private async void find_player () {
+    private void reset_state () {
+      current_title = "";
+      current_artist = "";
+      current_album = "";
+      current_art_url = "";
+      current_status = "Stopped";
+      album_art_pixbuf = null;
+      ForcePixbuf = null;
+      Icon = NowPlayingDocklet.ICON;
+      Text = _("No media playing");
+      build_menu ();
+    }
+
+    private async void bind_dbus_monitor () {
       try {
-        if (dbus_list == null) {
-          dbus_list = yield Bus.get_proxy (BusType.SESSION,
+        if (dbus_monitor == null) {
+          dbus_monitor = yield Bus.get_proxy (BusType.SESSION,
             "org.freedesktop.DBus", "/org/freedesktop/DBus");
         }
 
-        var names = dbus_list.list_names ();
-        foreach (unowned string name in names) {
-          if (name.has_prefix ("org.mpris.MediaPlayer2.")) {
-            yield connect_to_player (name);
-            return;
-          }
+        if (name_owner_handler_id == 0) {
+          name_owner_handler_id = dbus_monitor.name_owner_changed.connect (
+            (name, old_owner, new_owner) => {
+              if (name.has_prefix ("org.mpris.MediaPlayer2."))
+                refresh_player_connection.begin ();
+            }
+          );
         }
       } catch (Error e) {
-        warning ("Failed to find MPRIS player: %s", e.message);
+        warning ("Failed to monitor D-Bus names: %s", e.message);
       }
     }
 
@@ -137,7 +167,7 @@ namespace Docky {
         props_handler_id = props_proxy.properties_changed.connect (
           (iface, changed, invalidated) => {
             if (iface == "org.mpris.MediaPlayer2.Player")
-              update_metadata ();
+              refresh_player_connection.begin ();
           }
         );
 
@@ -145,53 +175,135 @@ namespace Docky {
       } catch (Error e) {
         warning ("Failed to connect to player %s: %s", bus_name, e.message);
         player = null;
+        reset_state ();
       }
+    }
+
+    private async string? select_best_player () {
+      try {
+        if (dbus_list == null) {
+          dbus_list = yield Bus.get_proxy (BusType.SESSION,
+            "org.freedesktop.DBus", "/org/freedesktop/DBus");
+        }
+
+        string? best_player = null;
+        int best_score = -1000;
+
+        var names = dbus_list.list_names ();
+        foreach (unowned string name in names) {
+          if (!name.has_prefix ("org.mpris.MediaPlayer2."))
+            continue;
+
+          try {
+            var candidate = yield Bus.get_proxy<MprisPlayer> (BusType.SESSION, name, "/org/mpris/MediaPlayer2");
+            var status = candidate.playback_status ?? "Stopped";
+            var score = player_priority_score (name, status);
+
+            // Keep the current player on ties to avoid rapid flipping.
+            if (best_player == null || score > best_score ||
+                (score == best_score && name == current_player_bus)) {
+              best_player = name;
+              best_score = score;
+            }
+          } catch {
+            // Ignore players that become unavailable mid-scan.
+          }
+        }
+
+        return best_player;
+      } catch (Error e) {
+        warning ("Failed to select MPRIS player: %s", e.message);
+      }
+
+      return null;
+    }
+
+    private int player_priority_score (string bus_name, string status) {
+      var score = 0;
+
+      // Playback state is the strongest signal.
+      if (status == "Playing")
+        score += 1000;
+      else if (status == "Paused")
+        score += 100;
+
+      // Prefer dedicated media apps over browser MPRIS bridges.
+      if (is_browser_player (bus_name))
+        score -= 50;
+      else
+        score += 50;
+
+      // Light preference for common desktop music apps.
+      if (bus_name.has_prefix ("org.mpris.MediaPlayer2.spotify"))
+        score += 25;
+
+      return score;
+    }
+
+    private bool is_browser_player (string bus_name) {
+      return bus_name.has_prefix ("org.mpris.MediaPlayer2.firefox")
+        || bus_name.has_prefix ("org.mpris.MediaPlayer2.chromium")
+        || bus_name.has_prefix ("org.mpris.MediaPlayer2.chrome")
+        || bus_name.has_prefix ("org.mpris.MediaPlayer2.brave")
+        || bus_name.has_prefix ("org.mpris.MediaPlayer2.edge")
+        || bus_name.has_prefix ("org.mpris.MediaPlayer2.vivaldi")
+        || bus_name.has_prefix ("org.mpris.MediaPlayer2.opera")
+        || bus_name.has_prefix ("org.mpris.MediaPlayer2.epiphany");
+    }
+
+    private async void refresh_player_connection () {
+      var best_player = yield select_best_player ();
+
+      if (best_player == null) {
+        disconnect_player ();
+        reset_state ();
+        return;
+      }
+
+      if (player == null || current_player_bus != best_player) {
+        yield connect_to_player (best_player);
+        return;
+      }
+
+      update_metadata ();
     }
 
     private void update_metadata () {
       if (player == null)
         return;
 
-      try {
-        current_status = player.playback_status ?? "Stopped";
-      } catch {
-        current_status = "Stopped";
-      }
+      current_status = player.playback_status ?? "Stopped";
 
-      try {
-        var meta = player.metadata;
-        if (meta != null) {
-          var title_var = meta.lookup ("xesam:title");
-          current_title = (title_var != null) ? title_var.get_string () : "";
+      var meta = player.metadata;
+      if (meta != null) {
+        var title_var = meta.lookup ("xesam:title");
+        current_title = (title_var != null) ? title_var.get_string () : "";
 
-          var artist_var = meta.lookup ("xesam:artist");
-          if (artist_var != null) {
-            // Artist can be a string array
-            if (artist_var.is_of_type (VariantType.STRING_ARRAY)) {
-              var artists = artist_var.get_strv ();
-              current_artist = string.joinv (", ", artists);
-            } else if (artist_var.is_of_type (VariantType.STRING)) {
-              current_artist = artist_var.get_string ();
-            } else {
-              current_artist = "";
-            }
+        var artist_var = meta.lookup ("xesam:artist");
+        if (artist_var != null) {
+          // Artist can be a string array
+          if (artist_var.is_of_type (VariantType.STRING_ARRAY)) {
+            var artists = artist_var.get_strv ();
+            current_artist = string.joinv (", ", (string[]) artists);
+          } else if (artist_var.is_of_type (VariantType.STRING)) {
+            current_artist = artist_var.get_string ();
           } else {
             current_artist = "";
           }
-
-          var album_var = meta.lookup ("xesam:album");
-          current_album = (album_var != null) ? album_var.get_string () : "";
-
-          var art_var = meta.lookup ("mpris:artUrl");
-          var new_art_url = (art_var != null) ? art_var.get_string () : "";
-
-          if (new_art_url != current_art_url) {
-            current_art_url = new_art_url;
-            load_album_art.begin ();
-          }
+        } else {
+          current_artist = "";
         }
-      } catch {
-        // Metadata read failed, keep previous values
+
+        var album_var = meta.lookup ("xesam:album");
+        current_album = (album_var != null) ? album_var.get_string () : "";
+
+        var art_var = meta.lookup ("mpris:artUrl");
+        var new_art_url = (art_var != null) ? art_var.get_string () : "";
+
+        if (new_art_url != current_art_url) {
+          current_art_url = new_art_url;
+          load_album_art.begin ();
+        }
       }
 
       // Update tooltip
@@ -231,7 +343,8 @@ namespace Docky {
 
       try {
         if (current_art_url.has_prefix ("file://")) {
-          var path = Filename.from_uri (current_art_url);
+          string? hostname = null;
+          var path = Filename.from_uri (current_art_url, out hostname);
           album_art_pixbuf = new Gdk.Pixbuf.from_file_at_scale (path, 128, 128, true);
         } else if (current_art_url.has_prefix ("http://") || current_art_url.has_prefix ("https://")) {
           // For HTTP URLs, download to temp and load
@@ -377,7 +490,7 @@ namespace Docky {
     protected override AnimationType on_clicked (PopupButton button,
                                                   Gdk.ModifierType mod, uint32 event_time) {
       if ((button & PopupButton.LEFT) != 0) {
-        update_metadata ();
+        refresh_player_connection.begin ();
         show_now_playing_menu ();
         return AnimationType.NONE;
       }
