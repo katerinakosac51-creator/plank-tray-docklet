@@ -539,18 +539,12 @@ namespace Docky {
     }
 
     private async void activate_tray_item (string bus_name, string object_path) {
-      // Try SNI Activate first
-      try {
-        var proxy = yield Bus.get_proxy<StatusNotifierItemProxy> (BusType.SESSION,
-          bus_name, object_path);
-        proxy.activate (0, 0);
-        return;
-      } catch {}
-
-      // Fallback: raise window by PID using xdg-activate or xdotool
+      // Strategy: Try PID/Bamf matching first (works for most desktop apps).
+      // Only fall back to SNI Activate for tray-only apps without Bamf windows.
       uint32 pid = get_pid_for_bus_name (bus_name);
+
+      // 1. Try to find and focus a window via Bamf matcher (most reliable)
       if (pid > 0) {
-        // Use plank's WindowControl via Bamf matcher
         var matcher = Plank.Matcher.get_default ();
         foreach (var app in matcher.active_launchers ()) {
           if (app is Bamf.Application) {
@@ -565,6 +559,17 @@ namespace Docky {
             }
           }
         }
+      }
+
+      // 2. Fallback: try SNI Activate (many apps don't implement it — Spotify, etc.)
+      try {
+        var proxy = yield Bus.get_proxy<StatusNotifierItemProxy> (BusType.SESSION,
+          bus_name, object_path);
+        proxy.activate (0, 0);
+      } catch (IOError e) {
+        // Suppress "UnknownMethod" — expected for apps without Activate
+        if (!(e is IOError.FAILED && e.message.contains ("UnknownMethod")))
+          warning ("Failed to activate tray item %s: %s", bus_name, e.message);
       }
     }
 

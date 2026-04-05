@@ -248,8 +248,13 @@ namespace Plank {
                                     null,
                                     current_event,
                                     null);
-            if (status != Gdk.GrabStatus.SUCCESS)
-              warning ("Seat grab failed during drag begin: %d", status);
+            if (status != Gdk.GrabStatus.SUCCESS) {
+              // NOT_VIEWABLE and ALREADY_GRABBED are benign during
+              // hide/unhide animations — no need to warn about them.
+              if (status != Gdk.GrabStatus.NOT_VIEWABLE &&
+                  status != Gdk.GrabStatus.ALREADY_GRABBED)
+                warning ("Seat grab failed during drag begin: %d", status);
+            }
           }
         }
       }
