@@ -18,6 +18,9 @@ Plank Tray Docklet is a customized fork of Plank Reloaded that adds a **System T
 - **Stacks Docklet** — Stack-based file/folder shortcuts on the dock
 - **Applications Docklet Modernized** — Popup window with search, rounded corners, keyboard-driven (Super key support)
 - **Clippy Docklet Enhanced** — Image support, improved text handling and menu organization
+- **Multiple docklet instances** — Any docklet (Clock, Tray, Separator, etc.) can be added multiple times; all instances persist across restarts
+- **Docklets inside folders** — Docklets placed inside folder items are fully interactive on left-click, even when not also present on the main dock
+- **Clock docklet fixes** — Calendar popup no longer crashes plank when closed; correct bundled icon shown in the docklet picker
 
 All features from Plank Reloaded remain intact. See below for the full feature set inherited from the parent project.
 
