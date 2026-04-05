@@ -46,7 +46,6 @@ plank_lib_sources = [
   'Services/Settings.vala',
   'Services/System.vala',
   'Services/Unity.vala',
-  'Services/KeybindingManager.vala',
   'Services/Worker.vala',
   'Widgets/CompositedWindow.vala',
   'Widgets/DockWindow.vala',

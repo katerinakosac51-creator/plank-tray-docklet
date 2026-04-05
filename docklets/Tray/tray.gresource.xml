@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<gresources>
+	<gresource prefix="/net/launchpad/plank/docklets/tray">
+		<file
+      compressed="true"
+      preprocess="xml-stripblanks"
+    >icons/system-tray.svg</file>
+	</gresource>
+</gresources>

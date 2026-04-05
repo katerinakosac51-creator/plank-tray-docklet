@@ -94,9 +94,6 @@ namespace Plank {
     [GtkChild]
     unowned Gtk.IconView view_docklets;
 
-    [GtkChild]
-    unowned Gtk.Box box_keybindings;
-
     public PreferencesWindow (DockController controller) {
       Object (controller: controller);
     }
@@ -109,7 +106,6 @@ namespace Plank {
 
       init_dock_tab ();
       init_docklets_tab ();
-      init_keybindings_tab ();
       connect_signals ();
 
       notify["controller"].connect (controller_changed);
@@ -558,104 +554,6 @@ namespace Plank {
       Gtk.drag_set_icon_surface (context, surface);
     }
 
-    void init_keybindings_tab () {
-      // Clear existing children
-      foreach (var child in box_keybindings.get_children ())
-        box_keybindings.remove (child);
-
-      var grid = new Gtk.Grid ();
-      grid.row_spacing = 8;
-      grid.column_spacing = 12;
-      grid.visible = true;
-
-      int row = 0;
-
-      // Header
-      var header = new Gtk.Label (_("Keybindings"));
-      header.halign = Gtk.Align.START;
-      header.visible = true;
-      header.get_style_context ().add_class ("dim-label");
-      var attrs = new Pango.AttrList ();
-      attrs.insert (Pango.attr_weight_new (Pango.Weight.BOLD));
-      header.attributes = attrs;
-      grid.attach (header, 0, row, 2, 1);
-      row++;
-
-      var desc = new Gtk.Label (_("Assign global keybindings to dock items. Use GTK accelerator format (e.g. <Super>, <Control><Alt>a)."));
-      desc.halign = Gtk.Align.START;
-      desc.wrap = true;
-      desc.max_width_chars = 45;
-      desc.visible = true;
-      desc.get_style_context ().add_class ("dim-label");
-      grid.attach (desc, 0, row, 2, 1);
-      row++;
-
-      // Separator
-      var sep = new Gtk.Separator (Gtk.Orientation.HORIZONTAL);
-      sep.visible = true;
-      sep.margin_top = 4;
-      sep.margin_bottom = 4;
-      grid.attach (sep, 0, row, 2, 1);
-      row++;
-
-      // List all dock items that have a name
-      foreach (var item in controller.Items) {
-        if (item.Text == null || item.Text == "")
-          continue;
-
-        var label = new Gtk.Label (item.Text + ":");
-        label.halign = Gtk.Align.END;
-        label.visible = true;
-        grid.attach (label, 0, row, 1, 1);
-
-        var entry = new Gtk.Entry ();
-        entry.text = item.Prefs.Keybinding ?? "";
-        entry.placeholder_text = _("None");
-        entry.hexpand = true;
-        entry.visible = true;
-        entry.tooltip_text = _("Press a key combination or type an accelerator (e.g. <Super>)");
-
-        // Save on change
-        unowned DockItem bound_item = item;
-        entry.changed.connect (() => {
-          bound_item.Prefs.Keybinding = entry.text;
-        });
-
-        // Capture key press to auto-fill accelerator
-        entry.key_press_event.connect ((event) => {
-          var mods = event.state & Gtk.accelerator_get_default_mod_mask ();
-          var key = event.keyval;
-
-          // Allow normal typing for manual entry
-          if (mods == 0 && key != Gdk.Key.Super_L && key != Gdk.Key.Super_R)
-            return false;
-
-          // Build accelerator string
-          string accel;
-          if (key == Gdk.Key.Super_L || key == Gdk.Key.Super_R) {
-            accel = "<Super>";
-          } else {
-            accel = Gtk.accelerator_name (key, (Gdk.ModifierType) mods);
-          }
-
-          entry.text = accel;
-          return true;
-        });
-
-        grid.attach (entry, 1, row, 1, 1);
-        row++;
-      }
-
-      if (row == 3) {
-        // No items found
-        var no_items = new Gtk.Label (_("No dock items available."));
-        no_items.visible = true;
-        no_items.sensitive = false;
-        grid.attach (no_items, 0, row, 2, 1);
-      }
-
-      box_keybindings.pack_start (grid, false, false, 0);
-    }
 
     [CCode (instance_pos = -1)]
     void view_item_activated (Gtk.IconView view, Gtk.TreePath path) {

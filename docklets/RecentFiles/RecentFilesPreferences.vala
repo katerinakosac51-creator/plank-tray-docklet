@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2025 Plank Reloaded Developers
+// Copyright (C) 2026 Plank Reloaded Developers
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -18,18 +18,18 @@
 using Plank;
 
 namespace Docky {
-  public class ApplicationsPreferences : DockItemPreferences {
-    public string CustomIcon { get; set; default = ""; }
+  public class RecentFilesPreferences : DockItemPreferences {
+    [Description (nick = "max-items",
+                  blurb = "Maximum number of recent files to display")]
+    public int MaxItems { get; set; default = 20; }
 
-    public ApplicationsPreferences.with_file (GLib.File file)
+    public RecentFilesPreferences.with_file (GLib.File file)
     {
       base.with_file (file);
     }
 
     protected override void reset_properties () {
-      LargeIcons = false;
-      CustomIcon = "";
-      Keybinding = "<Super_L>";
+      MaxItems = 20;
     }
   }
 }

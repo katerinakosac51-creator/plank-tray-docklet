@@ -176,6 +176,11 @@ namespace Docky {
       }
     }
 
+    public override bool toggle () {
+      toggle_popup ();
+      return true;
+    }
+
     protected override AnimationType on_scrolled(Gdk.ScrollDirection direction,
                                                  Gdk.ModifierType mod, uint32 event_time) {
       return AnimationType.NONE;
@@ -294,6 +299,41 @@ namespace Docky {
       return btn;
     }
 
+    private void style_popup (Gtk.Window win) {
+      win.set_visual (win.get_screen ().get_rgba_visual ());
+      win.app_paintable = true;
+
+      var css = new Gtk.CssProvider ();
+      try {
+        css.load_from_data ("""
+          .plank-popup {
+            background-color: @theme_bg_color;
+            border: 1px solid alpha(@theme_fg_color, 0.2);
+            border-radius: 12px;
+            padding: 4px;
+          }
+        """);
+      } catch (Error e) {
+        warning ("Failed to load popup CSS: %s", e.message);
+      }
+      win.get_style_context ().add_provider (css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+      win.get_style_context ().add_class ("plank-popup");
+
+      win.draw.connect ((cr) => {
+        var ctx = win.get_style_context ();
+        var alloc = Gtk.Allocation ();
+        win.get_allocation (out alloc);
+        cr.save ();
+        cr.set_source_rgba (0, 0, 0, 0);
+        cr.set_operator (Cairo.Operator.SOURCE);
+        cr.paint ();
+        cr.restore ();
+        ctx.render_background (cr, 0, 0, alloc.width, alloc.height);
+        ctx.render_frame (cr, 0, 0, alloc.width, alloc.height);
+        return false;
+      });
+    }
+
     private void ensure_popup () {
       if (popup_window != null) return;
 
@@ -304,17 +344,7 @@ namespace Docky {
       popup_window.skip_taskbar_hint = true;
       popup_window.skip_pager_hint = true;
       popup_window.set_keep_above (true);
-
-      // Rounded corners via CSS
-      var css_provider = new Gtk.CssProvider ();
-      try {
-        css_provider.load_from_data ("window { border-radius: 12px; }");
-      } catch (Error e) {
-        warning ("Failed to load CSS: %s", e.message);
-      }
-      popup_window.get_style_context ().add_provider (css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
-      popup_window.app_paintable = true;
-      popup_window.set_visual (popup_window.get_screen ().get_rgba_visual ());
+      style_popup (popup_window);
 
       var vbox = new Gtk.Box (Gtk.Orientation.VERTICAL, 4);
       vbox.margin = 6;
@@ -419,14 +449,16 @@ namespace Docky {
       }
 
       popup_window.move (x, y);
-      popup_window.present ();
+      popup_window.present_with_time (Gdk.CURRENT_TIME);
       popup_visible = true;
 
-      // Ensure focus even when activated via global keybinding
-      popup_window.present_with_time (Gdk.CURRENT_TIME);
-      Idle.add (() => {
-        if (search_entry != null) {
-          search_entry.grab_focus ();
+      // Force X11 input focus — needed when triggered via D-Bus
+      Timeout.add (50, () => {
+        if (popup_window != null && popup_window.get_window () != null) {
+          popup_window.get_window ().focus (Gdk.CURRENT_TIME);
+          popup_window.get_window ().raise ();
+          if (search_entry != null)
+            search_entry.grab_focus ();
         }
         return false;
       });

@@ -82,5 +82,13 @@ namespace Plank
 		 * @return whether it was successfully retrieved
 		 */
 		public abstract bool get_hover_position (string uri, out int x, out int y, out Gtk.PositionType dock_position) throws GLib.DBusError, GLib.IOError;
+
+		/**
+		 * Toggle a docklet popup by name (e.g. "applications", "tray")
+		 *
+		 * @param name the docklet name
+		 * @return whether the docklet was found and toggled
+		 */
+		public abstract bool toggle_docklet (string name) throws GLib.DBusError, GLib.IOError;
 	}
 }

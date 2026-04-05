@@ -137,6 +137,19 @@ namespace Plank
 			return result;
 		}
 
+		public bool toggle_docklet (string name)
+		{
+			var query = name.down ();
+			foreach (unowned DockItem item in controller.Items) {
+				if (item is DockletItem) {
+					if (item.Text != null && item.Text.down () == query) {
+						return ((DockletItem) item).toggle ();
+					}
+				}
+			}
+			return false;
+		}
+
 		public bool get_hover_position (string uri, out int x, out int y, out Gtk.PositionType dock_position)
 		{
 			var items = controller.Items;

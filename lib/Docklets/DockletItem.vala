@@ -25,5 +25,15 @@ namespace Plank
 		{
 			return true;
 		}
+
+		/**
+		 * Toggle this docklet's popup. Override in docklets that have popups.
+		 *
+		 * @return true if handled
+		 */
+		public virtual bool toggle ()
+		{
+			return false;
+		}
 	}
 }

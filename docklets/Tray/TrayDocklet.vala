@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2024 Plank Reloaded Developers
+// Copyright (C) 2026 Plank Reloaded Developers
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -16,27 +16,30 @@
 //
 
 public static void docklet_init (Plank.DockletManager manager) {
-  manager.register_docklet (typeof (Docky.ClippyDocklet));
+  manager.register_docklet (typeof (Docky.TrayDocklet));
 }
 
 namespace Docky {
-  public class ClippyDocklet : Object, Plank.Docklet {
-    private const string ID = "clippy";
-    public const string G_RESOURCE_PATH = "/net/launchpad/plank/docklets/clippy";
-    public const string ICON = "clippy-clipboard;;resource://" + G_RESOURCE_PATH + "/icons/clippy.svg;;xclipboard;;clipboard;;edit-cut";
+  public const string G_RESOURCE_PATH = "/net/launchpad/plank/docklets/tray";
+
+  public class TrayDocklet : Object, Plank.Docklet {
+    private const string ID = "tray";
+    private const string ICON_NAME = "system-tray";
+    private const string ICON_RESOURCE = "resource://" + G_RESOURCE_PATH + "/icons/system-tray.svg";
+    private const string ICON_PATH = ICON_NAME + ";;" + ICON_RESOURCE;
 
     public unowned string get_id () { return ID; }
 
-    public unowned string get_name () { return _("Clippy"); }
+    public unowned string get_name () { return _("System Tray"); }
 
-    public unowned string get_description () { return _("Keep recent clipboard entries."); }
+    public unowned string get_description () { return _("Show system tray icons."); }
 
-    public unowned string get_icon () { return ICON; }
+    public unowned string get_icon () { return ICON_PATH; }
 
     public bool is_supported () { return true; }
 
     public Plank.DockElement make_element (string launcher, GLib.File file) {
-      return new ClippyDockItem.with_dockitem_file (file);
+      return new TrayDockItem.with_dockitem_file (file);
     }
   }
 }

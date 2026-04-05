@@ -176,7 +176,7 @@ namespace Plank {
      * {@inheritDoc}
      */
     public override void activate () {
-      print ("Plank is already running.\n");
+      // Silently ignore - plank is already running
     }
 
     /**

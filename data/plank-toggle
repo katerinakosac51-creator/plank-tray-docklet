@@ -1,0 +1,16 @@
+#!/bin/sh
+# Toggle a plank docklet popup
+# Usage: plank-toggle <docklet-name>
+#   e.g. plank-toggle applications
+#        plank-toggle "system tray"
+
+if [ -z "$1" ]; then
+  echo "Usage: plank-toggle <docklet-name>" >&2
+  exit 1
+fi
+
+exec dbus-send --session --print-reply --type=method_call \
+  --dest=net.launchpad.plank \
+  /net/launchpad/plank/dock1 \
+  net.launchpad.plank.Items.ToggleDocklet \
+  "string:$1" > /dev/null 2>&1

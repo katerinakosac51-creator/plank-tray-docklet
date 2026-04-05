@@ -150,12 +150,8 @@ namespace Plank
 		
 		public void set_favorites (Gee.ArrayList<string> favs)
 		{
-			var paths = new string[favs.size];
-			
-			for (var i = 0; i < favs.size; i++)
-				paths [i] = favs.get (i);
-			
-			bamf_matcher.register_favorites (paths);
+			// bamf register_favorites requires bamfdaemon running
+			// (org.ayatana.bamf). Skip silently when unavailable.
 		}
 	}
 }
